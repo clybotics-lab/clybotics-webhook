@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import secrets
 from typing import Any, Optional
 
 from flask import Blueprint, abort, jsonify, request
@@ -61,13 +60,16 @@ def provision():
     page_id = _read_meta_str(meta, "pageId", "page_id")
 
     raw_verify = body.get("verify_token")
-    verify: str
-    if raw_verify is not None and str(raw_verify).strip():
-        verify = str(raw_verify).strip()
-        if len(verify) > 256:
-            return jsonify({"ok": False, "error": "verify_token must be at most 256 characters."}), 400
-    else:
-        verify = secrets.token_hex(20)
+    verify = str(raw_verify).strip() if raw_verify is not None else ""
+    if not verify:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "verify_token is required. Set it in the dashboard under the callback URL, then register.",
+            }
+        ), 400
+    if len(verify) > 256:
+        return jsonify({"ok": False, "error": "verify_token must be at most 256 characters."}), 400
     _db.upsert_facebook_provision(ws, bot_id, page_id, verify)
 
     public_base = str(body.get("webhook_public_base", "")).strip().rstrip("/")
