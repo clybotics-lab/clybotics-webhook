@@ -5,7 +5,7 @@ import re
 import time
 from typing import Any, Optional
 
-from config import DEFAULT_BOT_REPLY, DIFY_DEFAULT_BASE_URL, DIFY_RUNTIME_BASE_CACHE_SECONDS
+from config import DIFY_DEFAULT_BASE_URL, DIFY_RUNTIME_BASE_CACHE_SECONDS
 from services.dify_chat import run_blocking_chat
 from services.outbound import send_facebook_text, send_telegram_text, send_whatsapp_text
 from services.supabase_client import SupabaseRest
@@ -135,11 +135,7 @@ def process_text_message(
             raw_for_storage["dify_error"] = err[:500]
 
     if not reply_text:
-        sp = bot.get("system_prompt")
-        if isinstance(sp, str) and sp.strip():
-            reply_text = f"{DEFAULT_BOT_REPLY}\n\n— {sp.strip()[:280]}"
-        else:
-            reply_text = DEFAULT_BOT_REPLY
+        return
 
     db.insert_chat_message(
         workspace_id,

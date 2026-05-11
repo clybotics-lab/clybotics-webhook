@@ -23,12 +23,6 @@ META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
 # Optional: require this header on all POST webhooks (extra gate in addition to per-bot tokens).
 WEBHOOK_GATE_SECRET = os.environ.get("WEBHOOK_GATE_SECRET", "").strip()
 
-# Fallback reply when Dify or outbound send fails.
-DEFAULT_BOT_REPLY = os.environ.get(
-    "DEFAULT_BOT_REPLY",
-    "Thanks — we received your message and will get back to you shortly.",
-).strip()
-
 # When bots.metadata has no difyBaseUrl: use this env first, then runtime_settings.dify_server_base_url (see inbound_pipeline).
 DIFY_DEFAULT_BASE_URL = os.environ.get("DIFY_DEFAULT_BASE_URL", "").strip()
 
