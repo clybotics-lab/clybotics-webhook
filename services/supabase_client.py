@@ -66,25 +66,6 @@ class SupabaseRest:
         s = str(v).strip()
         return s or None
 
-    def get_runtime_setting_text(self, setting_key: str) -> Optional[str]:
-        r = self._get(
-            "/runtime_settings",
-            {
-                "setting_key": f"eq.{setting_key}",
-                "select": "setting_value_text",
-                "limit": "1",
-            },
-        )
-        r.raise_for_status()
-        rows = r.json()
-        if not rows:
-            return None
-        v = rows[0].get("setting_value_text")
-        if v is None:
-            return None
-        s = str(v).strip()
-        return s if s else None
-
     def get_bot(self, bot_id: str) -> Optional[dict[str, Any]]:
         r = self._get(
             "/bots",
@@ -121,6 +102,19 @@ class SupabaseRest:
                         "config",
                     ]
                 ),
+            },
+        )
+        r.raise_for_status()
+        rows = r.json()
+        return rows[0] if rows else None
+
+    def get_chat_session_by_id(self, session_id: str) -> Optional[dict[str, Any]]:
+        r = self._get(
+            "/chat_sessions",
+            {
+                "id": f"eq.{session_id}",
+                "select": "id,workspace_id,bot_id,platform,customer_external_id,customer_name,session_metadata",
+                "limit": "1",
             },
         )
         r.raise_for_status()
@@ -261,6 +255,22 @@ class SupabaseRest:
         role = str(row.get("role") or "")
         return role in ("owner", "admin", "manager", "operator")
 
+    def user_is_active_workspace_member(self, user_id: str, workspace_id: str) -> bool:
+        r = self._get(
+            "/workspace_members",
+            {
+                "workspace_id": f"eq.{workspace_id}",
+                "user_id": f"eq.{user_id}",
+                "select": "is_active",
+                "limit": "1",
+            },
+        )
+        r.raise_for_status()
+        rows = r.json()
+        if not rows:
+            return False
+        return rows[0].get("is_active") is not False
+
     def upsert_facebook_provision(
         self,
         workspace_id: str,
@@ -319,3 +329,57 @@ class SupabaseRest:
                 "status": "disconnected",
             },
         )
+
+    def get_bot_workspace_id(self, bot_id: str) -> Optional[str]:
+        bot = self.get_bot(bot_id)
+        if not bot:
+            return None
+        return str(bot.get("workspace_id") or "").strip() or None
+
+    def find_payment_by_provider_tx(self, payment_provider: str, transaction_id: str) -> Optional[dict[str, Any]]:
+        r = self._get(
+            "/payments",
+            {
+                "payment_provider": f"eq.{payment_provider}",
+                "transaction_id": f"eq.{transaction_id}",
+                "select": "id,status",
+                "limit": "1",
+            },
+        )
+        r.raise_for_status()
+        rows = r.json()
+        return rows[0] if rows else None
+
+    def get_bot_subscription_row(self, workspace_id: str, bot_id: str) -> Optional[dict[str, Any]]:
+        r = self._get(
+            "/bot_subscriptions",
+            {
+                "workspace_id": f"eq.{workspace_id}",
+                "bot_id": f"eq.{bot_id}",
+                "select": "id,plan_code,workspace_id,bot_id",
+                "limit": "1",
+            },
+        )
+        r.raise_for_status()
+        rows = r.json()
+        return rows[0] if rows else None
+
+    def insert_payment_row(self, row: dict[str, Any]) -> None:
+        r = self._post("/payments", [row])
+        r.raise_for_status()
+
+    def patch_bot_subscription_by_bot(self, workspace_id: str, bot_id: str, fields: dict[str, Any]) -> None:
+        r = self._patch(
+            "/bot_subscriptions",
+            fields,
+            {"workspace_id": f"eq.{workspace_id}", "bot_id": f"eq.{bot_id}"},
+        )
+        r.raise_for_status()
+
+    def patch_bot_row(self, workspace_id: str, bot_id: str, fields: dict[str, Any]) -> None:
+        r = self._patch(
+            "/bots",
+            fields,
+            {"id": f"eq.{bot_id}", "workspace_id": f"eq.{workspace_id}"},
+        )
+        r.raise_for_status()

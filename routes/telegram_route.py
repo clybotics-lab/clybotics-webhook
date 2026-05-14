@@ -30,6 +30,7 @@ def telegram_webhook(bot_id: str, path_secret: str):
         abort(404)
     ws = str(bot["workspace_id"])
     ch = _db.get_bot_channel(ws, bot_id, "telegram")
+    # Missing row (e.g. admin deleted channel): reject; URL path secret alone must not accept traffic.
     if not ch:
         abort(403)
 

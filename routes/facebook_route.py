@@ -61,6 +61,7 @@ def facebook_webhook(bot_id: str):
         abort(404)
     ws = str(bot["workspace_id"])
     ch = _db.get_bot_channel(ws, bot_id, "facebook")
+    # No row or disconnected (e.g. admin hard-deleted bot_channels): ack 200 so Meta does not retry storm.
     if not ch or str(ch.get("status") or "") != "connected":
         return jsonify({"ok": True, "ignored": True}), 200
 

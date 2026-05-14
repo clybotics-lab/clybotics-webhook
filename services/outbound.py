@@ -5,6 +5,28 @@ from typing import Any, Optional
 import httpx
 
 
+def send_facebook_agent_tagged_text(page_id: str, page_access_token: str, recipient_psid: str, text: str) -> Optional[str]:
+    """Human/agent reply from dashboard (MESSAGE_TAG + HUMAN_AGENT)."""
+    url = f"https://graph.facebook.com/v19.0/{page_id}/messages"
+    try:
+        r = httpx.post(
+            url,
+            params={"access_token": page_access_token},
+            json={
+                "recipient": {"id": recipient_psid},
+                "message": {"text": text[:2000]},
+                "messaging_type": "MESSAGE_TAG",
+                "tag": "HUMAN_AGENT",
+            },
+            timeout=30.0,
+        )
+    except Exception as e:  # noqa: BLE001
+        return str(e)
+    if r.status_code >= 400:
+        return r.text[:500]
+    return None
+
+
 def send_facebook_text(page_id: str, page_access_token: str, recipient_psid: str, text: str) -> Optional[str]:
     url = f"https://graph.facebook.com/v19.0/{page_id}/messages"
     try:

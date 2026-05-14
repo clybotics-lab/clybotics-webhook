@@ -68,6 +68,7 @@ def process_text_message(
     message_text: str,
     raw_for_storage: dict[str, Any],
     customer_name: Optional[str] = None,
+    prefilled_bot_reply: Optional[str] = None,
 ) -> None:
     bot = db.get_bot(bot_id)
     if not bot:
@@ -78,11 +79,17 @@ def process_text_message(
     meta = dict(meta)
 
     channel = db.get_bot_channel(workspace_id, bot_id, platform)
-    if not channel:
-        raise ValueError("channel_not_configured")
+    if platform == "website":
+        # Embedded widget logs here without a dedicated "connected" bot_channels row.
+        if channel is None:
+            channel = {}
+    else:
+        if not channel:
+            # bot_channels row removed or never created (tenant/admin delete webhook path).
+            raise ValueError("channel_not_configured")
 
-    if str(channel.get("status") or "") != "connected":
-        raise ValueError("channel_not_connected")
+        if str(channel.get("status") or "") != "connected":
+            raise ValueError("channel_not_connected")
 
     session = db.find_chat_session(workspace_id, bot_id, platform, external_user_id)
     session_meta: dict[str, Any] = {}
@@ -124,7 +131,10 @@ def process_text_message(
     conv_id = _read_meta_str(session_meta, "dify_conversation_id", "difyConversationId")
 
     reply_text: Optional[str] = None
-    if base and api_key:
+    prefilled = (prefilled_bot_reply or "").strip()
+    if prefilled:
+        reply_text = prefilled
+    elif base and api_key:
         ans, new_conv, err = run_blocking_chat(base, api_key, dify_user, message_text, conv_id)
         if ans:
             reply_text = ans

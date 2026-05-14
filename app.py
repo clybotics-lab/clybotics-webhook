@@ -5,8 +5,13 @@ from flask_cors import CORS
 
 from config import CORS_ORIGINS
 from routes.facebook_route import bp as facebook_bp
+from routes.internal_conversation import bp as internal_conversation_bp
 from routes.internal_facebook import bp as internal_facebook_bp
+from routes.internal_lemon import bp as internal_lemon_bp
+from routes.internal_website import bp as internal_website_bp
+from routes.lemon_webhook import bp as lemon_webhook_bp
 from routes.telegram_route import bp as telegram_bp
+from routes.website_public import bp as website_public_bp
 from routes.whatsapp_route import bp as whatsapp_bp
 
 
@@ -22,6 +27,11 @@ def create_app() -> Flask:
     app.register_blueprint(whatsapp_bp)
     app.register_blueprint(telegram_bp)
     app.register_blueprint(internal_facebook_bp)
+    app.register_blueprint(internal_conversation_bp)
+    app.register_blueprint(internal_website_bp)
+    app.register_blueprint(internal_lemon_bp)
+    app.register_blueprint(lemon_webhook_bp)
+    app.register_blueprint(website_public_bp)
 
     @app.get("/health")
     def health():

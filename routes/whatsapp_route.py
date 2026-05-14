@@ -60,6 +60,7 @@ def whatsapp_webhook(bot_id: str):
         abort(404)
     ws = str(bot["workspace_id"])
     ch = _db.get_bot_channel(ws, bot_id, "whatsapp")
+    # No row or disconnected (e.g. admin hard-deleted bot_channels): ack 200 for Meta stability.
     if not ch or str(ch.get("status") or "") != "connected":
         return jsonify({"ok": True, "ignored": True}), 200
 
