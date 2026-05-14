@@ -2,7 +2,7 @@
 
 Clybotics **channel webhooks** service (Flask): Facebook Messenger, WhatsApp Cloud, Telegram, plus authenticated internal routes for dashboard provisioning.
 
-Synced from the `flask-webhooks` app in the main Clybotics monorepo.
+This repository is the source of truth for the channel webhooks service. A copy of this folder may exist beside the dashboard app locally for development only; do not commit that copy into the chatbot repository.
 
 ## Deploy on Vercel
 
