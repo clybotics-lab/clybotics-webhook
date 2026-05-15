@@ -35,6 +35,14 @@ DIFY_RUNTIME_BASE_CACHE_SECONDS = float(os.environ.get("DIFY_RUNTIME_BASE_CACHE_
 # Dify chat uses the same API key pattern as the assigned pool (provider_api_key in bots.metadata).
 DIFY_CHAT_TIMEOUT = float(os.environ.get("DIFY_CHAT_TIMEOUT", "90"))
 
+# 1 = acknowledge Meta/Telegram/WhatsApp webhooks immediately; process in a background thread (not for Vercel serverless).
+WEBHOOK_ASYNC_PROCESSING = os.environ.get("WEBHOOK_ASYNC_PROCESSING", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
 # Comma-separated origins for flask-cors (e.g. https://app.clybotics.com,http://localhost:8080). Use * for dev only.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 

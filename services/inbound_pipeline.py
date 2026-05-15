@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Any, Optional
 
 from config import DIFY_DEFAULT_BASE_URL, DIFY_RUNTIME_BASE_CACHE_SECONDS
@@ -59,6 +60,68 @@ def dify_fallback_health_info(db: SupabaseRest) -> dict[str, Any]:
     }
 
 
+def _send_platform_reply(
+    platform: str,
+    meta: dict[str, Any],
+    channel: dict[str, Any],
+    external_user_id: str,
+    reply_text: str,
+) -> Optional[str]:
+    if platform == "facebook":
+        page_id = _read_meta_str(meta, "pageId", "page_id")
+        token = _read_meta_str(meta, "accessToken", "access_token")
+        if page_id and token:
+            return send_facebook_text(page_id, token, external_user_id, reply_text)
+    elif platform == "telegram":
+        token = _read_meta_str(meta, "telegramBotToken", "telegram_bot_token")
+        if token:
+            return send_telegram_text(token, external_user_id, reply_text)
+    elif platform == "whatsapp":
+        phone_number_id = str(channel.get("page_id") or _read_meta_str(meta, "pageId", "page_id"))
+        token = _read_meta_str(meta, "accessToken", "access_token")
+        if phone_number_id and token:
+            return send_whatsapp_text(phone_number_id, token, external_user_id, reply_text)
+    return None
+
+
+def _persist_after_outbound(
+    db: SupabaseRest,
+    *,
+    workspace_id: str,
+    bot_id: str,
+    platform: str,
+    sid: str,
+    reply_text: str,
+    session_meta: dict[str, Any],
+    new_conv_id: Optional[str],
+    send_err: Optional[str],
+    raw_for_storage: dict[str, Any],
+) -> None:
+    """Log bot message / stats after the user already received the channel reply."""
+    if send_err:
+        raw_for_storage["outbound_error"] = send_err[:500]
+        return
+
+    bot_payload = {"source": "clybotics_webhook_service", "platform": platform}
+
+    def _insert_bot_message() -> None:
+        db.insert_chat_message(workspace_id, bot_id, sid, "bot", reply_text, bot_payload)
+
+    def _patch_conv() -> None:
+        if new_conv_id:
+            session_meta["dify_conversation_id"] = new_conv_id
+            db.patch_chat_session_metadata(sid, session_meta)
+
+    def _bump_out() -> None:
+        db.bump_stats(workspace_id, bot_id, platform, inbound=0, outbound=1)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(_insert_bot_message), pool.submit(_bump_out)]
+        if new_conv_id:
+            futures.append(pool.submit(_patch_conv))
+        wait(futures, return_when="ALL_COMPLETED")
+
+
 def process_text_message(
     db: SupabaseRest,
     *,
@@ -69,8 +132,11 @@ def process_text_message(
     raw_for_storage: dict[str, Any],
     customer_name: Optional[str] = None,
     prefilled_bot_reply: Optional[str] = None,
+    bot: Optional[dict[str, Any]] = None,
+    channel: Optional[dict[str, Any]] = None,
 ) -> None:
-    bot = db.get_bot(bot_id)
+    if bot is None:
+        bot = db.get_bot(bot_id)
     if not bot:
         raise ValueError("unknown_bot")
 
@@ -78,16 +144,14 @@ def process_text_message(
     meta = bot.get("metadata") if isinstance(bot.get("metadata"), dict) else {}
     meta = dict(meta)
 
-    channel = db.get_bot_channel(workspace_id, bot_id, platform)
+    if channel is None:
+        channel = db.get_bot_channel(workspace_id, bot_id, platform)
     if platform == "website":
-        # Embedded widget logs here without a dedicated "connected" bot_channels row.
         if channel is None:
             channel = {}
     else:
         if not channel:
-            # bot_channels row removed or never created (tenant/admin delete webhook path).
             raise ValueError("channel_not_configured")
-
         if str(channel.get("status") or "") != "connected":
             raise ValueError("channel_not_connected")
 
@@ -131,6 +195,7 @@ def process_text_message(
     conv_id = _read_meta_str(session_meta, "dify_conversation_id", "difyConversationId")
 
     reply_text: Optional[str] = None
+    new_conv_id: Optional[str] = None
     prefilled = (prefilled_bot_reply or "").strip()
     if prefilled:
         reply_text = prefilled
@@ -139,43 +204,27 @@ def process_text_message(
         if ans:
             reply_text = ans
             if new_conv:
-                session_meta["dify_conversation_id"] = new_conv
-                db.patch_chat_session_metadata(sid, session_meta)
+                new_conv_id = new_conv
         elif err:
             raw_for_storage["dify_error"] = err[:500]
 
     if not reply_text:
         return
 
-    db.insert_chat_message(
-        workspace_id,
-        bot_id,
-        sid,
-        "bot",
-        reply_text,
-        {"source": "clybotics_webhook_service", "platform": platform},
+    # Deliver to Messenger / Telegram / WhatsApp before slower Supabase logging (same reply, faster UX).
+    send_err = _send_platform_reply(platform, meta, channel, external_user_id, reply_text)
+    _persist_after_outbound(
+        db,
+        workspace_id=workspace_id,
+        bot_id=bot_id,
+        platform=platform,
+        sid=sid,
+        reply_text=reply_text,
+        session_meta=session_meta,
+        new_conv_id=new_conv_id,
+        send_err=send_err,
+        raw_for_storage=raw_for_storage,
     )
-
-    send_err: Optional[str] = None
-    if platform == "facebook":
-        page_id = _read_meta_str(meta, "pageId", "page_id")
-        token = _read_meta_str(meta, "accessToken", "access_token")
-        if page_id and token:
-            send_err = send_facebook_text(page_id, token, external_user_id, reply_text)
-    elif platform == "telegram":
-        token = _read_meta_str(meta, "telegramBotToken", "telegram_bot_token")
-        if token:
-            send_err = send_telegram_text(token, external_user_id, reply_text)
-    elif platform == "whatsapp":
-        phone_number_id = str(channel.get("page_id") or _read_meta_str(meta, "pageId", "page_id"))
-        token = _read_meta_str(meta, "accessToken", "access_token")
-        if phone_number_id and token:
-            send_err = send_whatsapp_text(phone_number_id, token, external_user_id, reply_text)
-
-    if send_err:
-        raw_for_storage["outbound_error"] = send_err[:500]
-    else:
-        db.bump_stats(workspace_id, bot_id, platform, inbound=0, outbound=1)
 
 
 def verify_meta_signature(body_raw: bytes, signature_header: Optional[str], app_secret: str) -> bool:

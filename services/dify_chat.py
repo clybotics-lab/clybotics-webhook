@@ -6,6 +6,7 @@ from typing import Any, Optional, Tuple
 import httpx
 
 from config import DIFY_CHAT_TIMEOUT
+from services.http_pool import get_external_client
 
 
 def _normalize_base(raw: str) -> str:
@@ -36,7 +37,7 @@ def run_blocking_chat(
         "user": user,
     }
     try:
-        r = httpx.post(
+        r = get_external_client().post(
             url,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,

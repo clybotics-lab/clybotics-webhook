@@ -7,6 +7,7 @@ from flask import Blueprint, abort, jsonify, request
 from config import META_APP_SECRET, WEBHOOK_GATE_SECRET
 from services.inbound_pipeline import is_uuid, process_text_message, verify_meta_signature
 from services.supabase_client import SupabaseRest
+from services.webhook_dispatch import dispatch_channel_message
 
 bp = Blueprint("whatsapp", __name__, url_prefix="/v1/whatsapp")
 _db = SupabaseRest()
@@ -85,13 +86,16 @@ def whatsapp_webhook(bot_id: str):
                 text = text_body.get("body") if isinstance(text_body, dict) else None
                 if from_id and isinstance(text, str) and text.strip():
                     try:
-                        process_text_message(
-                            _db,
+                        dispatch_channel_message(
+                            process_text_message,
+                            db=_db,
                             bot_id=bot_id,
                             platform="whatsapp",
                             external_user_id=from_id,
                             message_text=text.strip(),
                             raw_for_storage={"whatsapp": msg},
+                            bot=bot,
+                            channel=ch,
                         )
                     except ValueError:
                         pass

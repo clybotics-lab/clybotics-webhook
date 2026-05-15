@@ -7,6 +7,7 @@ from flask import Blueprint, abort, jsonify, request
 from config import WEBHOOK_GATE_SECRET
 from services.inbound_pipeline import is_uuid, parse_telegram_text, process_text_message
 from services.supabase_client import SupabaseRest
+from services.webhook_dispatch import dispatch_channel_message
 
 bp = Blueprint("telegram", __name__, url_prefix="/v1/telegram")
 _db = SupabaseRest()
@@ -47,13 +48,16 @@ def telegram_webhook(bot_id: str, path_secret: str):
     chat_id, text, raw = parse_telegram_text(update)
     if chat_id and text:
         try:
-            process_text_message(
-                _db,
+            dispatch_channel_message(
+                process_text_message,
+                db=_db,
                 bot_id=bot_id,
                 platform="telegram",
                 external_user_id=chat_id,
                 message_text=text,
                 raw_for_storage={"telegram": raw},
+                bot=bot,
+                channel=ch,
             )
         except ValueError:
             pass

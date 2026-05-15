@@ -6,45 +6,45 @@ from typing import Any, Optional
 import httpx
 
 from config import SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL
+from services.http_pool import get_rest_client
 
 
 class SupabaseRest:
     def __init__(self) -> None:
         base = SUPABASE_URL.rstrip("/")
         self._rest = f"{base}/rest/v1"
+        self._rpc_base = f"{base}/rest/v1/rpc"
         self._headers = {
             "apikey": SUPABASE_SERVICE_ROLE_KEY,
             "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
             "Content-Type": "application/json",
         }
+        self._http = get_rest_client()
 
     def _get(self, path: str, params: Optional[dict[str, str]] = None) -> httpx.Response:
-        return httpx.get(f"{self._rest}{path}", headers=self._headers, params=params or {}, timeout=60.0)
+        return self._http.get(f"{self._rest}{path}", headers=self._headers, params=params or {})
 
     def _patch(self, path: str, payload: dict[str, Any], params: Optional[dict[str, str]] = None) -> httpx.Response:
-        return httpx.patch(
+        return self._http.patch(
             f"{self._rest}{path}",
             headers={**self._headers, "Prefer": "return=minimal"},
             params=params or {},
             content=json.dumps(payload),
-            timeout=60.0,
         )
 
     def _post(self, path: str, payload: Any, params: Optional[dict[str, str]] = None) -> httpx.Response:
-        return httpx.post(
+        return self._http.post(
             f"{self._rest}{path}",
             headers={**self._headers, "Prefer": "return=representation"},
             params=params or {},
             content=json.dumps(payload),
-            timeout=60.0,
         )
 
     def rpc(self, fn: str, payload: dict[str, Any]) -> httpx.Response:
-        return httpx.post(
-            f"{SUPABASE_URL.rstrip('/')}/rest/v1/rpc/{fn}",
+        return self._http.post(
+            f"{self._rpc_base}/{fn}",
             headers=self._headers,
             content=json.dumps(payload),
-            timeout=60.0,
         )
 
     def get_runtime_setting_text(self, setting_key: str) -> Optional[str]:

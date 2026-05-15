@@ -7,6 +7,7 @@ from flask import Blueprint, abort, jsonify, request
 from config import META_APP_SECRET, WEBHOOK_GATE_SECRET
 from services.inbound_pipeline import is_uuid, process_text_message, verify_meta_signature
 from services.supabase_client import SupabaseRest
+from services.webhook_dispatch import dispatch_channel_message
 
 bp = Blueprint("facebook", __name__, url_prefix="/v1/facebook")
 _db = SupabaseRest()
@@ -81,19 +82,22 @@ def facebook_webhook(bot_id: str):
             msg = ev.get("message", {})
             text = msg.get("text") if isinstance(msg, dict) else None
             if psid and isinstance(text, str) and text.strip():
+                raw_store = {"facebook": ev}
                 try:
-                    process_text_message(
-                        _db,
+                    dispatch_channel_message(
+                        process_text_message,
+                        db=_db,
                         bot_id=bot_id,
                         platform="facebook",
                         external_user_id=psid,
                         message_text=text.strip(),
-                        raw_for_storage={"facebook": ev},
+                        raw_for_storage=raw_store,
+                        bot=bot,
+                        channel=ch,
                     )
                 except ValueError:
                     pass
                 except Exception:  # noqa: BLE001
-                    # Log in production via your platform; never fail Meta retry storms permanently.
                     return jsonify({"ok": False}), 500
 
     return jsonify({"ok": True}), 200
