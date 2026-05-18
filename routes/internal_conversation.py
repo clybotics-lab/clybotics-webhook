@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from flask import Blueprint, abort, jsonify, request
 
+from services.conversation_window import meta_conversation_window_payload
 from services.inbound_pipeline import is_uuid
 from services.outbound import send_facebook_manual_reply, send_telegram_text, send_whatsapp_text
 from services.supabase_auth import fetch_user_from_jwt
@@ -64,6 +65,19 @@ def reply():
 
     if not _db.user_can_manage_bot_channels(uid, ws):
         abort(403)
+
+    if platform in ("facebook", "instagram", "whatsapp"):
+        last_customer_at = _db.get_last_customer_message_at(session_id)
+        win = meta_conversation_window_payload(last_customer_at)
+        if not win.get("window_open"):
+            if platform == "whatsapp":
+                msg = "24-hour window closed. Send an approved WhatsApp template from the dashboard instead."
+            else:
+                msg = (
+                    "24-hour messaging window closed. The customer must message your Page again "
+                    "before you can send a free-text reply."
+                )
+            return jsonify({"ok": False, "error": msg}), 400
 
     if not bot_subscription_is_active(_db, ws, bot_id):
         return (
@@ -139,3 +153,30 @@ def reply():
     )
     _db.bump_stats(ws, bot_id, platform, inbound=0, outbound=1)
     return jsonify({"ok": True}), 200
+
+
+@bp.get("/window")
+def conversation_window():
+    session_id = str(request.args.get("chat_session_id", "")).strip()
+    if not is_uuid(session_id):
+        abort(400)
+    jwt = _bearer_jwt()
+    if not jwt:
+        abort(401)
+    user = fetch_user_from_jwt(jwt)
+    if not user:
+        abort(401)
+    uid = str(user.get("id", ""))
+    if not uid:
+        abort(401)
+    sess = _db.get_chat_session_by_id(session_id)
+    if not sess:
+        return jsonify({"ok": False, "error": "Session not found."}), 404
+    platform = str(sess.get("platform") or "").strip().lower()
+    if platform not in ("facebook", "instagram", "whatsapp"):
+        return jsonify({"ok": False, "error": "24-hour window applies to Facebook, Instagram, and WhatsApp only."}), 400
+    ws = str(sess["workspace_id"])
+    if not _db.user_can_manage_bot_channels(uid, ws):
+        abort(403)
+    last_at = _db.get_last_customer_message_at(session_id)
+    return jsonify({"ok": True, "platform": platform, "window": meta_conversation_window_payload(last_at)}), 200

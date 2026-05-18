@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from flask import Blueprint, abort, jsonify, request
 
+from services.conversation_window import meta_conversation_window_payload
 from services.inbound_pipeline import is_uuid
 from services.supabase_auth import fetch_user_from_jwt
 from services.supabase_client import SupabaseRest
@@ -19,9 +19,6 @@ from services.whatsapp_templates import (
 
 bp = Blueprint("internal_whatsapp", __name__, url_prefix="/internal/v1/whatsapp")
 _db = SupabaseRest()
-
-WA_WINDOW = timedelta(hours=24)
-
 
 def _bearer_jwt() -> Optional[str]:
     h = request.headers.get("Authorization", "")
@@ -93,45 +90,6 @@ def _resolve_waba(phone_number_id: str, token: str, channel: dict[str, Any], ws:
             },
         )
     return waba
-
-
-def _window_payload(last_customer_at: Optional[str]) -> dict[str, Any]:
-    now = datetime.now(timezone.utc)
-    if not last_customer_at:
-        return {
-            "has_customer_message": False,
-            "window_open": False,
-            "is_new_contact": True,
-            "last_customer_message_at": None,
-            "window_expires_at": None,
-            "seconds_remaining": 0,
-        }
-    try:
-        s = last_customer_at.strip()
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        started = datetime.fromisoformat(s)
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return {
-            "has_customer_message": True,
-            "window_open": False,
-            "is_new_contact": False,
-            "last_customer_message_at": last_customer_at,
-            "window_expires_at": None,
-            "seconds_remaining": 0,
-        }
-    expires = started + WA_WINDOW
-    remaining = max(0, int((expires - now).total_seconds()))
-    return {
-        "has_customer_message": True,
-        "window_open": remaining > 0,
-        "is_new_contact": False,
-        "last_customer_message_at": started.isoformat(),
-        "window_expires_at": expires.isoformat(),
-        "seconds_remaining": remaining,
-    }
 
 
 @bp.post("/sync-phone")
@@ -237,7 +195,7 @@ def conversation_window():
     if not _db.user_can_manage_bot_channels(uid, ws):
         abort(403)
     last_at = _db.get_last_customer_message_at(session_id)
-    return jsonify({"ok": True, "window": _window_payload(last_at)}), 200
+    return jsonify({"ok": True, "window": meta_conversation_window_payload(last_at)}), 200
 
 
 @bp.post("/send-template")
