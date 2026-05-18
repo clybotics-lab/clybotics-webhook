@@ -5,8 +5,10 @@ from typing import Any
 from flask import Blueprint, abort, jsonify, request
 
 from config import WEBHOOK_GATE_SECRET
+from services.customer_identity import telegram_display_name
 from services.inbound_pipeline import is_uuid, parse_telegram_text, process_text_message
 from services.supabase_client import SupabaseRest
+from services.channel_inbound import dispatch_inbound_text
 from services.webhook_dispatch import dispatch_channel_message
 
 bp = Blueprint("telegram", __name__, url_prefix="/v1/telegram")
@@ -39,25 +41,25 @@ def telegram_webhook(bot_id: str, path_secret: str):
     if not expected or path_secret != expected:
         abort(403)
 
-    if str(ch.get("status") or "") != "connected":
-        return jsonify({"ok": True, "ignored": True}), 200
-
     update = request.get_json(force=True, silent=True)
     if not isinstance(update, dict):
         abort(400, "invalid json")
     chat_id, text, raw = parse_telegram_text(update)
     if chat_id and text:
         try:
-            dispatch_channel_message(
-                process_text_message,
+            dispatch_inbound_text(
                 db=_db,
+                workspace_id=ws,
                 bot_id=bot_id,
+                bot=bot,
+                channel=ch,
                 platform="telegram",
                 external_user_id=chat_id,
                 message_text=text,
                 raw_for_storage={"telegram": raw},
-                bot=bot,
-                channel=ch,
+                customer_name=telegram_display_name(raw),
+                work=process_text_message,
+                dispatch=dispatch_channel_message,
             )
         except ValueError:
             pass

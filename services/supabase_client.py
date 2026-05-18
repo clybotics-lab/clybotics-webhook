@@ -99,6 +99,7 @@ class SupabaseRest:
                         "webhook_verify_token",
                         "telegram_webhook_path_secret",
                         "webhook_connection_state",
+                        "integration_metadata",
                         "config",
                     ]
                 ),
@@ -107,6 +108,41 @@ class SupabaseRest:
         r.raise_for_status()
         rows = r.json()
         return rows[0] if rows else None
+
+    def sync_whatsapp_channel_phone(
+        self,
+        workspace_id: str,
+        bot_id: str,
+        phone_number_id: str,
+        display_phone: Optional[str] = None,
+        verified_name: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        ch = self.get_bot_channel(workspace_id, bot_id, "whatsapp")
+        if not ch:
+            return None
+        phone_number_id = str(phone_number_id or "").strip()
+        if not phone_number_id:
+            return ch
+        im = ch.get("integration_metadata")
+        if not isinstance(im, dict):
+            im = {}
+        new_im = dict(im)
+        if display_phone:
+            new_im["whatsapp_display_phone"] = str(display_phone).strip()
+        if verified_name:
+            new_im["whatsapp_verified_name"] = str(verified_name).strip()
+        patch: dict[str, Any] = {"page_id": phone_number_id, "integration_metadata": new_im}
+        r = self._patch(
+            "/bot_channels",
+            patch,
+            {
+                "workspace_id": f"eq.{workspace_id}",
+                "bot_id": f"eq.{bot_id}",
+                "platform": "eq.whatsapp",
+            },
+        )
+        r.raise_for_status()
+        return {**ch, **patch}
 
     def get_chat_session_by_id(self, session_id: str) -> Optional[dict[str, Any]]:
         r = self._get(
@@ -170,6 +206,24 @@ class SupabaseRest:
     def patch_chat_session_metadata(self, session_id: str, metadata: dict[str, Any]) -> None:
         r = self._patch("/chat_sessions", {"session_metadata": metadata}, {"id": f"eq.{session_id}"})
         r.raise_for_status()
+
+    def patch_chat_session_customer_name(self, session_id: str, customer_name: str) -> None:
+        name = str(customer_name or "").strip()
+        if not name:
+            return
+        r = self._patch("/chat_sessions", {"customer_name": name[:80]}, {"id": f"eq.{session_id}"})
+        r.raise_for_status()
+
+    def get_chat_session_customer_name(self, session_id: str) -> Optional[str]:
+        r = self._get(
+            "/chat_sessions",
+            {"id": f"eq.{session_id}", "select": "customer_name", "limit": "1"},
+        )
+        r.raise_for_status()
+        rows = r.json()
+        if not rows:
+            return None
+        return str(rows[0].get("customer_name") or "").strip() or None
 
     def insert_chat_message(
         self,
@@ -318,6 +372,90 @@ class SupabaseRest:
         )
         r.raise_for_status()
 
+    def upsert_instagram_provision(
+        self,
+        workspace_id: str,
+        bot_id: str,
+        page_id: str,
+        verify_token: str,
+    ) -> None:
+        existing = self.get_bot_channel(workspace_id, bot_id, "instagram")
+        patch: dict[str, Any] = {
+            "webhook_verify_token": verify_token,
+            "webhook_connection_state": "provisioned",
+            "status": "disconnected",
+        }
+        if page_id:
+            patch["page_id"] = page_id
+        elif not existing:
+            patch["page_id"] = None
+        if existing:
+            r = self._patch("/bot_channels", patch, {"id": f"eq.{existing['id']}"})
+        else:
+            body = {
+                "workspace_id": workspace_id,
+                "bot_id": bot_id,
+                "platform": "instagram",
+                "config": {},
+                **patch,
+            }
+            r = self._post("/bot_channels", body)
+        r.raise_for_status()
+
+    def patch_instagram_channel(
+        self,
+        workspace_id: str,
+        bot_id: str,
+        fields: dict[str, Any],
+    ) -> None:
+        r = self._patch(
+            "/bot_channels",
+            fields,
+            {
+                "workspace_id": f"eq.{workspace_id}",
+                "bot_id": f"eq.{bot_id}",
+                "platform": "eq.instagram",
+            },
+        )
+        r.raise_for_status()
+
+    def disconnect_instagram_channel(self, workspace_id: str, bot_id: str) -> None:
+        self.patch_instagram_channel(
+            workspace_id,
+            bot_id,
+            {
+                "webhook_verify_token": None,
+                "webhook_connected_at": None,
+                "webhook_connection_state": "none",
+                "status": "disconnected",
+                "page_id": None,
+            },
+        )
+
+    def sync_instagram_account_id(self, workspace_id: str, bot_id: str, instagram_account_id: str) -> None:
+        ch = self.get_bot_channel(workspace_id, bot_id, "instagram")
+        if not ch:
+            return
+        instagram_account_id = str(instagram_account_id or "").strip()
+        if not instagram_account_id:
+            return
+        im = ch.get("integration_metadata")
+        if not isinstance(im, dict):
+            im = {}
+        if str(im.get("instagram_account_id") or "").strip() == instagram_account_id:
+            return
+        new_im = {**im, "instagram_account_id": instagram_account_id}
+        r = self._patch(
+            "/bot_channels",
+            {"integration_metadata": new_im},
+            {
+                "workspace_id": f"eq.{workspace_id}",
+                "bot_id": f"eq.{bot_id}",
+                "platform": "eq.instagram",
+            },
+        )
+        r.raise_for_status()
+
     def disconnect_facebook_channel(self, workspace_id: str, bot_id: str) -> None:
         self.patch_facebook_channel(
             workspace_id,
@@ -356,7 +494,7 @@ class SupabaseRest:
             {
                 "workspace_id": f"eq.{workspace_id}",
                 "bot_id": f"eq.{bot_id}",
-                "select": "id,plan_code,workspace_id,bot_id",
+                "select": "id,plan_code,workspace_id,bot_id,status,expires_at",
                 "limit": "1",
             },
         )

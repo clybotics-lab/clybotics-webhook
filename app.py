@@ -5,8 +5,11 @@ from flask_cors import CORS
 
 from config import CORS_ORIGINS
 from routes.facebook_route import bp as facebook_bp
+from routes.instagram_route import bp as instagram_bp
 from routes.internal_conversation import bp as internal_conversation_bp
 from routes.internal_facebook import bp as internal_facebook_bp
+from routes.internal_instagram import bp as internal_instagram_bp
+from routes.internal_whatsapp import bp as internal_whatsapp_bp
 from routes.internal_lemon import bp as internal_lemon_bp
 from routes.internal_website import bp as internal_website_bp
 from routes.lemon_webhook import bp as lemon_webhook_bp
@@ -24,9 +27,12 @@ def create_app() -> Flask:
         methods=["GET", "POST", "OPTIONS"],
     )
     app.register_blueprint(facebook_bp)
+    app.register_blueprint(instagram_bp)
     app.register_blueprint(whatsapp_bp)
     app.register_blueprint(telegram_bp)
     app.register_blueprint(internal_facebook_bp)
+    app.register_blueprint(internal_instagram_bp)
+    app.register_blueprint(internal_whatsapp_bp)
     app.register_blueprint(internal_conversation_bp)
     app.register_blueprint(internal_website_bp)
     app.register_blueprint(internal_lemon_bp)

@@ -6,6 +6,7 @@ from flask import Blueprint, abort, jsonify, request
 
 from config import WEBSITE_WIDGET_GATE_SECRET
 from services.inbound_pipeline import process_text_message
+from services.subscription_gate import bot_subscription_is_active
 from services.supabase_client import SupabaseRest
 
 bp = Blueprint("website_public", __name__, url_prefix="/webhooks/v1/website")
@@ -56,7 +57,12 @@ def website_message():
 
     visitor_id = visitor_id[:240]
     message = message[:8000]
-    bot_reply_opt: Optional[str] = bot_reply if bot_reply else None
+    bot = _db.get_bot(bot_id)
+    if not bot:
+        return jsonify({"ok": False, "error": "Unknown bot_id."}), 404
+    ws = str(bot["workspace_id"])
+    sub_active = bot_subscription_is_active(_db, ws, bot_id)
+    bot_reply_opt: Optional[str] = bot_reply if bot_reply and sub_active else None
 
     raw: dict[str, Any] = {"source": "website_widget_http", "path": request.path}
     if request.remote_addr:
@@ -72,6 +78,8 @@ def website_message():
             raw_for_storage=raw,
             customer_name=visitor_name,
             prefilled_bot_reply=bot_reply_opt,
+            bot=bot,
+            auto_reply=sub_active,
         )
     except ValueError as e:
         code = str(e)

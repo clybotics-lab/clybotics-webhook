@@ -21,10 +21,12 @@ Set **`VITE_CHANNEL_WEBHOOK_BASE_URL`** (or equivalent) to that base URL **with 
 
 ### Routes (reference)
 
-- `GET|POST /v1/facebook/<bot_id>` — Meta webhook
+- `GET|POST /v1/facebook/<bot_id>` — Meta Messenger webhook
+- `GET|POST /v1/instagram/<bot_id>` — Instagram Direct (Meta) webhook
 - `GET|POST /v1/whatsapp/<bot_id>` — WhatsApp Cloud webhook
 - `POST /v1/telegram/<bot_id>/<secret>` — Telegram webhook
-- `POST /internal/v1/facebook/*` — Dashboard (JWT) provisioning
+- `POST /internal/v1/facebook/*` — Dashboard (JWT) Messenger provisioning
+- `POST /internal/v1/instagram/*` — Dashboard (JWT) Instagram provisioning
 
 ## Local run
 

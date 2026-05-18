@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from config import DIFY_DEFAULT_BASE_URL, DIFY_RUNTIME_BASE_CACHE_SECONDS
 from services.dify_chat import run_blocking_chat
+from services.customer_identity import is_placeholder_name, pick_customer_name
 from services.outbound import send_facebook_text, send_telegram_text, send_whatsapp_text
 from services.supabase_client import SupabaseRest
 
@@ -72,6 +73,13 @@ def _send_platform_reply(
         token = _read_meta_str(meta, "accessToken", "access_token")
         if page_id and token:
             return send_facebook_text(page_id, token, external_user_id, reply_text)
+    elif platform == "instagram":
+        page_id = str(channel.get("page_id") or "").strip() or _read_meta_str(
+            meta, "instagramPageId", "instagram_page_id", "pageId", "page_id"
+        )
+        token = _read_meta_str(meta, "instagramAccessToken", "instagram_access_token", "accessToken", "access_token")
+        if page_id and token:
+            return send_facebook_text(page_id, token, external_user_id, reply_text)
     elif platform == "telegram":
         token = _read_meta_str(meta, "telegramBotToken", "telegram_bot_token")
         if token:
@@ -134,6 +142,8 @@ def process_text_message(
     prefilled_bot_reply: Optional[str] = None,
     bot: Optional[dict[str, Any]] = None,
     channel: Optional[dict[str, Any]] = None,
+    auto_reply: bool = True,
+    allow_disconnected_channel: bool = False,
 ) -> None:
     if bot is None:
         bot = db.get_bot(bot_id)
@@ -155,6 +165,16 @@ def process_text_message(
         if str(channel.get("status") or "") != "connected":
             raise ValueError("channel_not_connected")
 
+    resolved_name = pick_customer_name(
+        platform=platform,
+        external_user_id=external_user_id,
+        message_text=message_text,
+        provided=customer_name,
+        raw_for_storage=raw_for_storage,
+        bot_meta=meta,
+        channel=channel,
+    )
+
     session = db.find_chat_session(workspace_id, bot_id, platform, external_user_id)
     session_meta: dict[str, Any] = {}
     if session:
@@ -174,10 +194,18 @@ def process_text_message(
             bot_id,
             platform,
             external_user_id,
-            customer_name,
+            resolved_name,
             tracking,
         )
         sid = str(created["id"])
+
+    if resolved_name and not is_placeholder_name(resolved_name):
+        try:
+            existing = db.get_chat_session_customer_name(sid)
+            if is_placeholder_name(existing):
+                db.patch_chat_session_customer_name(sid, resolved_name)
+        except Exception:  # noqa: BLE001
+            pass
 
     db.insert_chat_message(
         workspace_id,
@@ -188,6 +216,9 @@ def process_text_message(
         raw_for_storage,
     )
     db.bump_stats(workspace_id, bot_id, platform, inbound=1, outbound=0)
+
+    if not auto_reply:
+        return
 
     base, api_key = _dify_credentials(meta)
     base = _resolve_dify_api_base(db, base, api_key)

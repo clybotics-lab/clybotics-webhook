@@ -5,8 +5,9 @@ from typing import Any, Optional
 from flask import Blueprint, abort, jsonify, request
 
 from services.inbound_pipeline import is_uuid
-from services.outbound import send_facebook_agent_tagged_text, send_telegram_text, send_whatsapp_text
+from services.outbound import send_facebook_manual_reply, send_telegram_text, send_whatsapp_text
 from services.supabase_auth import fetch_user_from_jwt
+from services.subscription_gate import bot_subscription_is_active
 from services.supabase_client import SupabaseRest
 
 bp = Blueprint("internal_conversation", __name__, url_prefix="/internal/v1/conversation")
@@ -64,6 +65,17 @@ def reply():
     if not _db.user_can_manage_bot_channels(uid, ws):
         abort(403)
 
+    if not bot_subscription_is_active(_db, ws, bot_id):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "This bot has no active subscription. Renew or activate the bot to send replies from the dashboard.",
+                }
+            ),
+            403,
+        )
+
     bot = _db.get_bot(bot_id)
     if not bot:
         return jsonify({"ok": False, "error": "Bot not found."}), 404
@@ -82,7 +94,15 @@ def reply():
         token = _read_meta_str(meta, "accessToken", "access_token")
         if not page_id or not token:
             return jsonify({"ok": False, "error": "Facebook Page ID or access token missing on bot metadata."}), 400
-        send_err = send_facebook_agent_tagged_text(page_id, token, external, text)
+        send_err = send_facebook_manual_reply(page_id, token, external, text)
+    elif platform == "instagram":
+        page_id = str(channel.get("page_id") or "").strip() or _read_meta_str(
+            meta, "instagramPageId", "instagram_page_id", "pageId", "page_id"
+        )
+        token = _read_meta_str(meta, "instagramAccessToken", "instagram_access_token", "accessToken", "access_token")
+        if not page_id or not token:
+            return jsonify({"ok": False, "error": "Instagram Page ID or access token missing on bot metadata."}), 400
+        send_err = send_facebook_manual_reply(page_id, token, external, text)
     elif platform == "telegram":
         ttoken = _read_meta_str(meta, "telegramBotToken", "telegram_bot_token")
         if not ttoken:

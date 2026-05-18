@@ -7,6 +7,7 @@ from flask import Blueprint, abort, jsonify, request
 from config import META_APP_SECRET, WEBHOOK_GATE_SECRET
 from services.inbound_pipeline import is_uuid, process_text_message, verify_meta_signature
 from services.supabase_client import SupabaseRest
+from services.channel_inbound import dispatch_inbound_text
 from services.webhook_dispatch import dispatch_channel_message
 
 bp = Blueprint("facebook", __name__, url_prefix="/v1/facebook")
@@ -62,8 +63,7 @@ def facebook_webhook(bot_id: str):
         abort(404)
     ws = str(bot["workspace_id"])
     ch = _db.get_bot_channel(ws, bot_id, "facebook")
-    # No row or disconnected (e.g. admin hard-deleted bot_channels): ack 200 so Meta does not retry storm.
-    if not ch or str(ch.get("status") or "") != "connected":
+    if not ch:
         return jsonify({"ok": True, "ignored": True}), 200
 
     meta = bot.get("metadata") if isinstance(bot.get("metadata"), dict) else {}
@@ -84,16 +84,19 @@ def facebook_webhook(bot_id: str):
             if psid and isinstance(text, str) and text.strip():
                 raw_store = {"facebook": ev}
                 try:
-                    dispatch_channel_message(
-                        process_text_message,
+                    dispatch_inbound_text(
                         db=_db,
+                        workspace_id=ws,
                         bot_id=bot_id,
+                        bot=bot,
+                        channel=ch,
                         platform="facebook",
                         external_user_id=psid,
                         message_text=text.strip(),
                         raw_for_storage=raw_store,
-                        bot=bot,
-                        channel=ch,
+                        customer_name=None,
+                        work=process_text_message,
+                        dispatch=dispatch_channel_message,
                     )
                 except ValueError:
                     pass

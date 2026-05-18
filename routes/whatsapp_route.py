@@ -7,7 +7,9 @@ from flask import Blueprint, abort, jsonify, request
 from config import META_APP_SECRET, WEBHOOK_GATE_SECRET
 from services.inbound_pipeline import is_uuid, process_text_message, verify_meta_signature
 from services.supabase_client import SupabaseRest
+from services.channel_inbound import dispatch_inbound_text
 from services.webhook_dispatch import dispatch_channel_message
+from services.whatsapp_meta import whatsapp_metadata_from_webhook_body
 
 bp = Blueprint("whatsapp", __name__, url_prefix="/v1/whatsapp")
 _db = SupabaseRest()
@@ -61,13 +63,18 @@ def whatsapp_webhook(bot_id: str):
         abort(404)
     ws = str(bot["workspace_id"])
     ch = _db.get_bot_channel(ws, bot_id, "whatsapp")
-    # No row or disconnected (e.g. admin hard-deleted bot_channels): ack 200 for Meta stability.
-    if not ch or str(ch.get("status") or "") != "connected":
+    if not ch:
         return jsonify({"ok": True, "ignored": True}), 200
 
     meta = bot.get("metadata") if isinstance(bot.get("metadata"), dict) else {}
     meta_phone = str(meta.get("pageId") or meta.get("page_id") or "").strip()
     expected_phone_id = (ch.get("page_id") or "").strip() or meta_phone
+
+    for item in whatsapp_metadata_from_webhook_body(body):
+        phone_id = item.get("phone_number_id", "")
+        display = item.get("display_phone", "")
+        if phone_id and (not expected_phone_id or phone_id == expected_phone_id):
+            _db.sync_whatsapp_channel_phone(ws, bot_id, phone_id, display or None)
 
     for entry in body.get("entry", []) if isinstance(body, dict) else []:
         for change in entry.get("changes", []) or []:
@@ -86,16 +93,19 @@ def whatsapp_webhook(bot_id: str):
                 text = text_body.get("body") if isinstance(text_body, dict) else None
                 if from_id and isinstance(text, str) and text.strip():
                     try:
-                        dispatch_channel_message(
-                            process_text_message,
+                        dispatch_inbound_text(
                             db=_db,
+                            workspace_id=ws,
                             bot_id=bot_id,
+                            bot=bot,
+                            channel=ch,
                             platform="whatsapp",
                             external_user_id=from_id,
                             message_text=text.strip(),
-                            raw_for_storage={"whatsapp": msg},
-                            bot=bot,
-                            channel=ch,
+                            raw_for_storage={"whatsapp": msg, "value": value},
+                            customer_name=None,
+                            work=process_text_message,
+                            dispatch=dispatch_channel_message,
                         )
                     except ValueError:
                         pass
