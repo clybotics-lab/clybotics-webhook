@@ -214,6 +214,24 @@ class SupabaseRest:
         r = self._patch("/chat_sessions", {"customer_name": name[:80]}, {"id": f"eq.{session_id}"})
         r.raise_for_status()
 
+    def get_last_customer_message_at(self, chat_session_id: str) -> Optional[str]:
+        r = self._get(
+            "/chat_messages",
+            {
+                "chat_session_id": f"eq.{chat_session_id}",
+                "sender_type": f"eq.customer",
+                "select": "sent_at",
+                "order": "sent_at.desc",
+                "limit": "1",
+            },
+        )
+        r.raise_for_status()
+        rows = r.json()
+        if not rows:
+            return None
+        sent = rows[0].get("sent_at")
+        return str(sent).strip() if sent else None
+
     def get_chat_session_customer_name(self, session_id: str) -> Optional[str]:
         r = self._get(
             "/chat_sessions",
